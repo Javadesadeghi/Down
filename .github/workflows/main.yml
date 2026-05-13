@@ -1,38 +1,36 @@
-name: ⬇️ 01 - Download URL
+name: ⬇️ Download URL
 
 on:
   workflow_dispatch:
     inputs:
       urls:
-        description: '🔗 لینک های دانلود (با فاصله جدا کنید)'
+        description: "🔗 Links (separated by space)"
         required: true
         type: string
 
       mode:
-        description: '📦 حالت دانلود'
+        description: "📦 mode"
         required: false
-        default: 'normal'
+        default: "normal"
         type: choice
         options:
           - normal
           - zip
 
       password:
-        description: '🔒 رمز عبور برای فایل زیپ (اختیاری)'
+        description: "🔒 zip password (optional)"
         required: false
-        default: ''
+        default: ""
         type: string
 
 jobs:
-  save-file:
-    name: "📥 Download Files"
+  download:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
     permissions:
       contents: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -40,46 +38,45 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y aria2 zip curl bc
+          sudo apt-get install -y aria2 zip curl
 
       - name: Download files
         run: |
-          MODE="${{ github.event.inputs.mode }}"
+          mkdir -p downloads tmp
+
           URLS="${{ github.event.inputs.urls }}"
+          MODE="${{ github.event.inputs.mode }}"
           ZIP_PASSWORD="${{ github.event.inputs.password }}"
 
-          mkdir -p downloads tmp_downloads
+          download() {
+            url="$1"
+            name=$(basename "$url" | sed 's/[?#].*//')
 
-          download_file() {
-            URL="$1"
-            NAME=$(basename "$URL" | sed 's/%20/ /g' | sed 's/[?#].*//')
+            echo "Downloading $url"
 
-            echo "Downloading: $URL"
-
-            aria2c --dir=tmp_downloads --out="$NAME" "$URL" \
-              || curl -L -o "tmp_downloads/$NAME" "$URL"
+            aria2c -x 4 -s 4 -d tmp -o "$name" "$url" \
+              || curl -L -o "tmp/$name" "$url"
           }
 
-          for URL in $URLS; do
-            download_file "$URL"
+          for url in $URLS; do
+            download "$url"
           done
 
           if [ "$MODE" = "zip" ]; then
-            mkdir -p downloads/archive
+            mkdir -p downloads
 
-            for FILE in tmp_downloads/*; do
-              [ -f "$FILE" ] || continue
-
-              NAME=$(basename "$FILE")
+            for file in tmp/*; do
+              [ -f "$file" ] || continue
+              name=$(basename "$file")
 
               if [ -n "$ZIP_PASSWORD" ]; then
-                zip -P "$ZIP_PASSWORD" "downloads/archive/$NAME.zip" "$FILE"
+                zip -P "$ZIP_PASSWORD" "downloads/$name.zip" "$file"
               else
-                zip "downloads/archive/$NAME.zip" "$FILE"
+                zip "downloads/$name.zip" "$file"
               fi
             done
           else
-            cp -r tmp_downloads/* downloads/
+            cp -r tmp/* downloads/
           fi
 
       - name: Commit & Push
@@ -89,6 +86,6 @@ jobs:
 
           git add downloads
 
-          git commit -m "download files" || echo "No changes"
+          git commit -m "download files" || echo "no changes"
 
-          git push
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} HEAD:main
