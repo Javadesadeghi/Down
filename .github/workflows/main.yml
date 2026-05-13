@@ -7,6 +7,7 @@ on:
         description: "🔗 Links (one per line)"
         required: true
         type: string
+
       mode:
         description: "📦 mode"
         required: false
@@ -15,6 +16,7 @@ on:
         options:
           - normal
           - zip
+
       password:
         description: "🔒 zip password (optional)"
         required: false
@@ -25,13 +27,11 @@ jobs:
   download:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Install tools
         run: |
@@ -45,12 +45,17 @@ jobs:
           ZIP_PASSWORD: ${{ inputs.password }}
         run: |
           set -euo pipefail
+
           mkdir -p downloads tmp
 
           download() {
-            url="$1"
+            local url="$1"
+            local name
             name="$(basename "$url" | sed 's/[?#].*//')"
-            [ -n "$name" ] || name="downloaded_file"
+
+            if [ -z "$name" ] || [ "$name" = "/" ] || [ "$name" = "." ]; then
+              name="downloaded_file_$(date +%s%N)"
+            fi
 
             echo "Downloading $url"
             aria2c -x 4 -s 4 -d tmp -o "$name" "$url" || curl -L --fail -o "tmp/$name" "$url"
@@ -65,6 +70,7 @@ jobs:
             for file in tmp/*; do
               [ -f "$file" ] || continue
               name="$(basename "$file")"
+
               if [ -n "$ZIP_PASSWORD" ]; then
                 zip -j -P "$ZIP_PASSWORD" "downloads/$name.zip" "$file"
               else
@@ -75,11 +81,12 @@ jobs:
             cp -r tmp/* downloads/ 2>/dev/null || true
           fi
 
-      - name: Commit & Push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          ls -lah downloads
 
-          git add downloads
-          git commit -m "download files" || echo "no changes"
-          git push
+      - name: Upload downloads
+        uses: actions/upload-artifact@v4
+        with:
+          name: downloads
+          path: downloads/
+          if-no-files-found: error
+          retention-days: 7
