@@ -4,10 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       urls:
-        description: "🔗 Links (separated by space)"
+        description: "🔗 Links (one per line)"
         required: true
         type: string
-
       mode:
         description: "📦 mode"
         required: false
@@ -16,7 +15,6 @@ on:
         options:
           - normal
           - zip
-
       password:
         description: "🔒 zip password (optional)"
         required: false
@@ -41,51 +39,47 @@ jobs:
           sudo apt-get install -y aria2 zip curl
 
       - name: Download files
+        env:
+          URLS: ${{ inputs.urls }}
+          MODE: ${{ inputs.mode }}
+          ZIP_PASSWORD: ${{ inputs.password }}
         run: |
+          set -euo pipefail
           mkdir -p downloads tmp
-
-          URLS="${{ github.event.inputs.urls }}"
-          MODE="${{ github.event.inputs.mode }}"
-          ZIP_PASSWORD="${{ github.event.inputs.password }}"
 
           download() {
             url="$1"
-            name=$(basename "$url" | sed 's/[?#].*//')
+            name="$(basename "$url" | sed 's/[?#].*//')"
+            [ -n "$name" ] || name="downloaded_file"
 
             echo "Downloading $url"
-
-            aria2c -x 4 -s 4 -d tmp -o "$name" "$url" \
-              || curl -L -o "tmp/$name" "$url"
+            aria2c -x 4 -s 4 -d tmp -o "$name" "$url" || curl -L --fail -o "tmp/$name" "$url"
           }
 
-          for url in $URLS; do
+          while IFS= read -r url; do
+            [ -n "$url" ] || continue
             download "$url"
-          done
+          done <<< "$URLS"
 
           if [ "$MODE" = "zip" ]; then
-            mkdir -p downloads
-
             for file in tmp/*; do
               [ -f "$file" ] || continue
-              name=$(basename "$file")
-
+              name="$(basename "$file")"
               if [ -n "$ZIP_PASSWORD" ]; then
-                zip -P "$ZIP_PASSWORD" "downloads/$name.zip" "$file"
+                zip -j -P "$ZIP_PASSWORD" "downloads/$name.zip" "$file"
               else
-                zip "downloads/$name.zip" "$file"
+                zip -j "downloads/$name.zip" "$file"
               fi
             done
           else
-            cp -r tmp/* downloads/
+            cp -r tmp/* downloads/ 2>/dev/null || true
           fi
 
       - name: Commit & Push
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add downloads
-
           git commit -m "download files" || echo "no changes"
-
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} HEAD:main
+          git push
